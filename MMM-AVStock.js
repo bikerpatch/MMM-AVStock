@@ -16,6 +16,7 @@ const headerTitle = ["Symbol", "Cur.Price", "Prev.Close", "CHG", "CHG%", "Volume
 
 Module.register("MMM-AVStock", {
   defaults: {
+    debug: false,
     apiKey : "",
     timeFormat: "DD-MM HH:mm",
     symbols : ["aapl", "GOOGL", "005930.KS"],

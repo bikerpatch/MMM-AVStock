@@ -48,8 +48,12 @@ module.exports = NodeHelper.create({
       interval = (this.doneFirstPooling) ? 180000 : 15000
     }
 
+    if (this.config.debug == true) console.log("[AVSTOCK] Interval: ", interval);
+
     if (this.pooler.length > 0) {
-      var symbol = this.pooler.shift()
+      var symbol = this.pooler.shift();
+      if (this.config.debug == true) console.log("[AVSTOCK] Shifted: ", symbol);
+      
       this.callAPI(this.config, symbol, (noti, payload)=>{
         this.sendSocketNotification(noti, payload)
       })
@@ -73,14 +77,16 @@ module.exports = NodeHelper.create({
     url += symbol + "&apikey=" + cfg.apiKey
 
     request(url, (error, response, body)=>{
-      //console.log("[AVSTOCK] API is called - ", symbol)
+      if (this.config.debug == true) console.log("[AVSTOCK] API is called - ", symbol);
       var data = null
       if (error) {
         console.log("[AVSTOCK] API Error: ", error)
         return
       }
+      
       data = JSON.parse(body)
       if (data.hasOwnProperty("Note")) {
+        if (this.config.debug == true) console.log("[AVSTOCK] API body - ", body);
         console.log("[AVSTOCK] Error: API Call limit exceeded.")
       }
       if (data.hasOwnProperty("Error Message")) {
@@ -138,8 +144,9 @@ module.exports = NodeHelper.create({
 
   prepareScan: function() {
     for (s in this.config.symbols) {
-      var symbol = this.config.symbols[s]
-      this.pooler.push(symbol)
+      var symbol = this.config.symbols[s];
+      this.pooler.push(symbol);
+      if (this.config.debug == true) console.log("[AVSTOCK] Pushed: ", symbol);
     }
   },
 })
