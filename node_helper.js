@@ -24,11 +24,14 @@ module.exports = NodeHelper.create({
   },
 
   socketNotificationReceived: function(noti, payload) {
+
+    this.config = payload
+    
     if (noti == "INIT") {
-      this.config = payload
       console.log("[AVSTOCK] Initialized.")
     }
     if (noti == "START") {
+      if (this.config.debug == true) console.log("[AVSTOCK] Start notification recevied.")
       if (this.pooler.length == 0) {
         this.prepareScan()
       }

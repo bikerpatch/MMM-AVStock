@@ -205,13 +205,16 @@ Module.register("MMM-AVStock", {
   },
 
   notificationReceived: function(noti, payload) {
+    if (this.config.debug == true) console.log("[AVSTOCK] Notification Received: ", noti);
+    if (this.config.debug == true) console.log("[AVSTOCK] Notification Payload: ", payload);
     if (noti == "DOM_OBJECTS_CREATED") {
-      this.sendSocketNotification("START")
+      this.sendSocketNotification("START", this.config)
       this.prepare()
     }
   },
 
   socketNotificationReceived: function(noti, payload) {
+    if (this.config.debug == true) console.log("[AVSTOCK] Notification Received: ", noti);
     if (noti == "UPDATE") {
       if (payload.hasOwnProperty('symbol')) {
         this.stocks[payload.symbol] = payload
