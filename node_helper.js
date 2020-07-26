@@ -18,59 +18,26 @@ String.prototype.hashCode = function() {
 
 module.exports = NodeHelper.create({
   start: function() {
-    this.config = null
-    this.pooler = []
-    this.doneFirstPooling = false
+    this.config = new Map();
   },
 
   socketNotificationReceived: function(noti, payload) {
 
-    this.config = payload
-    
     if (noti == "INIT") {
-      console.log("[AVSTOCK] Initialized.")
+      this.config.set(payload.instanceId, payload.config);
+      console.log("[AVSTOCK] Initialized for instance ", payload.instanceId);
     }
-    if (noti == "START") {
-      if (this.config.debug == true) console.log("[AVSTOCK] Start notification recevied.")
-      if (this.pooler.length == 0) {
-        this.prepareScan()
-      }
-      this.startPooling()
-    }
-  },
-
-  startPooling: function() {
-    // Since December 2018, Alphavantage changed API quota limit.(500 per day)
-    // So, fixed interval is used. for the first cycle, 15sec is used.
-    // After first cycle, 3min is used for interval to match 500 quota limits.
-    // So, one cycle would be 3min * symbol length;
-    var interval = 0
-    if (this.config.premiumAccount) {
-      interval = this.config.poolInterval
-    } else {
-      interval = (this.doneFirstPooling) ? 180000 : 15000
-    }
-
-    if (this.config.debug == true) console.log("[AVSTOCK] Interval: ", interval);
-
-    if (this.pooler.length > 0) {
-      var symbol = this.pooler.shift();
-      if (this.config.debug == true) console.log("[AVSTOCK] Shifted: ", symbol);
+    if (noti == "FETCH") {
+      if (this.config.get(payload.instanceId).debug == true) console.log("[AVSTOCK] Fetch notification recevied, instance ", payload.instanceId)
       
-      this.callAPI(this.config, symbol, (noti, payload)=>{
-        this.sendSocketNotification(noti, payload)
-      })
-    } else {
-      this.doneFirstPooling = true
-      this.prepareScan()
-    }
+      this.callAPI(payload.instanceId, payload.config, payload.symbol, (noti, payload)=>{
+        this.sendSocketNotification(noti, payload);
+      });
 
-    var timer = setTimeout(()=>{
-      this.startPooling()
-    }, interval)
+    }
   },
 
-  callAPI: function(cfg, symbol, callback) {
+  callAPI: function(instanceId, cfg, symbol, callback) {
     var url = ""
     if (cfg.mode != "series") {
       url = "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol="
@@ -80,7 +47,7 @@ module.exports = NodeHelper.create({
     url += symbol + "&apikey=" + cfg.apiKey
 
     request(url, (error, response, body)=>{
-      if (this.config.debug == true) console.log("[AVSTOCK] API is called - ", symbol);
+      if (this.config.get(instanceId).debug == true) console.log("[AVSTOCK] API is called - ", instanceId, symbol);
       var data = null
       if (error) {
         console.log("[AVSTOCK] API Error: ", error)
@@ -89,18 +56,18 @@ module.exports = NodeHelper.create({
       
       data = JSON.parse(body)
       if (data.hasOwnProperty("Note")) {
-        if (this.config.debug == true) console.log("[AVSTOCK] API body - ", body);
-        console.log("[AVSTOCK] Error: API Call limit exceeded.")
+        if (this.config.get(instanceId).debug == true) console.log("[AVSTOCK] API body - ", instanceId, body);
+        console.log("[AVSTOCK] Error: API Call limit exceeded - ", instanceId)
       }
       if (data.hasOwnProperty("Error Message")) {
-        console.log("[AVSTOCK] Error:", data["Error Message"])
+        console.log("[AVSTOCK] Error:", instanceId, data["Error Message"])
       }
       if (data["Global Quote"]) {
         if (!data["Global Quote"].hasOwnProperty("01. symbol")) {
-          console.log("[AVSTOCK] Data Error: There is no available data for", symbol)
+          console.log("[AVSTOCK] Data Error: There is no available data for", instanceId, symbol)
         }
         //console.log("[AVSTOCK] Response is parsed - ", symbol)
-        var dec = this.config.decimals		//decimal Factor, converts decimals to numbers that needs to be multiplied for Math.round
+        var dec = this.config.get(instanceId).decimals		//decimal Factor, converts decimals to numbers that needs to be multiplied for Math.round
         var result = {
           "symbol": data["Global Quote"]["01. symbol"],
           "open": parseFloat(data["Global Quote"]["02. open"]).toFixed(dec),
@@ -115,7 +82,7 @@ module.exports = NodeHelper.create({
           "requestTime": moment().format(cfg.timeFormat),
           "hash": symbol.hashCode()
         }
-        callback('UPDATE', result)
+        callback('UPDATE', {instanceId: instanceId, result: result})
       } else if (data["Time Series (Daily)"]) {
         //console.log("[AVSTOCK] Response is parsed - ", symbol)
         var series = data["Time Series (Daily)"]
@@ -140,16 +107,9 @@ module.exports = NodeHelper.create({
           item.candle = ((item.close - item.open) >= 0) ? "up" : "down"
           ts.push(item)
         }
-        callback('UPDATE_SERIES', ts)
+        callback('UPDATE_SERIES', {instanceId: instanceId, ts: ts})
       }
     })
-  },
+  }
 
-  prepareScan: function() {
-    for (s in this.config.symbols) {
-      var symbol = this.config.symbols[s];
-      this.pooler.push(symbol);
-      if (this.config.debug == true) console.log("[AVSTOCK] Pushed: ", symbol);
-    }
-  },
 })

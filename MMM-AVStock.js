@@ -36,14 +36,59 @@ Module.register("MMM-AVStock", {
   },
 
   start: function() {
-    this.sendSocketNotification("INIT", this.config)
-    this.stocks = {}
-    this.isStarted = false
+    this.sendSocketNotification("INIT", {instanceId: this.identifier, config: this.config});
+    this.stocks = {};
+    this.pooler = [];
+    this.isStarted = false;
+    this.doneFirstPooling = false;
+  },
+
+  startPooling: function() {
+    // Since December 2018, Alphavantage changed API quota limit.(500 per day)
+    // So, fixed interval is used. for the first cycle, 15sec is used.
+    // After first cycle, 3min is used for interval to match 500 quota limits.
+    // So, one cycle would be 3min * symbol length;
+    var interval = 0
+    if (this.config.premiumAccount) {
+      interval = this.config.poolInterval
+    } else {
+      interval = (this.doneFirstPooling) ? 180000 : 15000
+    }
+
+    clearTimeout(this.timer);
+    this.timer = null;
+
+    if (this.config.debug == true) console.log("[AVSTOCK] Interval: ", interval);
+
+    if (this.pooler.length > 0) {
+      var symbol = this.pooler.shift();
+      if (this.config.debug == true) console.log("[AVSTOCK] Shifted: ", symbol);
+      
+      this.sendSocketNotification("FETCH", {symbol: symbol, config: this.config, instanceId: this.identifier});
+
+    } else {
+      this.doneFirstPooling = true
+      this.prepareScan()
+    }
+
+    var self = this;
+    this.timer = setTimeout( function() {
+      self.startPooling();
+    }, interval); //update according to the config
+  },
+
+  prepareScan: function() {
+    for (s in this.config.symbols) {
+      var symbol = this.config.symbols[s];
+      this.pooler.push(symbol);
+      if (this.config.debug == true) console.log("[AVSTOCK] Pushed: ", symbol);
+    }
   },
 
   getDom: function() {
     var wrapper = document.createElement("div")
     wrapper.id = "AVSTOCK"
+    wrapper.classList.add("avstock");
     return wrapper
   },
 
@@ -71,13 +116,14 @@ Module.register("MMM-AVStock", {
   },
 
   prepareSeries: function() {
-    var wrapper = document.getElementById("AVSTOCK")
+    var wrapper = document.querySelector('#' + this.identifier + ' #AVSTOCK');
     wrapper.innerHTML = ""
 
     var stock = document.createElement("div")
     stock.innerHTML = ""
-    stock.id = "AVSTOCK_SERIES"
+    stock.id = "AVSTOCK_SERIES";
     stock.className = "stock"
+    stock.classList.add("avstock_series");
 
     var symbol = document.createElement("div")
     symbol.className = "symbol"
@@ -106,25 +152,28 @@ Module.register("MMM-AVStock", {
 
     var cvs = document.createElement("canvas")
     cvs.id = "AVSTOCK_CANVAS"
+    cvs.classList.add("avstock_canvas");
     wrapper.appendChild(cvs)
 
     var tl = document.createElement("div")
     tl.className = "tagline"
     tl.id = "AVSTOCK_TAGLINE"
+    tl.classList.add("avstock_tagline");
     tl.innerHTML = "Last updated : "
     wrapper.appendChild(tl)
 
-    var cvs = document.getElementById("AVSTOCK_CANVAS")
+    var cvs = document.querySelector('#' + this.identifier + ' #AVSTOCK_CANVAS');
     cvs.width = cvs.clientWidth
     cvs.height = cvs.clientHeight
   },
 
   prepareTable: function() {
-    var wrapper = document.getElementById("AVSTOCK")
+    var wrapper = document.querySelector('#' + this.identifier + ' #AVSTOCK');
     wrapper.innerHTML = ""
 
     var tbl = document.createElement("table")
     tbl.id = "AVSTOCK_TABLE"
+    tbl.classList.add("avstock_table");
     var thead = document.createElement("thead")
     var tr = document.createElement("tr")
     for (i in header) {
@@ -161,7 +210,7 @@ Module.register("MMM-AVStock", {
   },
 
   prepareTicker: function() {
-    var wrapper = document.getElementById("AVSTOCK")
+    var wrapper = document.querySelector('#' + this.identifier + ' #AVSTOCK');
     wrapper.innerHTML = ""
     var wrap = document.createElement("div")
     wrap.className = "ticker-wrap"
@@ -205,24 +254,27 @@ Module.register("MMM-AVStock", {
   },
 
   notificationReceived: function(noti, payload) {
-    if (this.config.debug == true) console.log("[AVSTOCK] Notification Received: ", noti);
-    if (this.config.debug == true) console.log("[AVSTOCK] Notification Payload: ", payload);
     if (noti == "DOM_OBJECTS_CREATED") {
-      this.sendSocketNotification("START", this.config)
-      this.prepare()
+      if (this.pooler.length == 0) {
+        this.prepareScan()
+      }
+      this.startPooling()
+      this.prepare() 
     }
   },
 
   socketNotificationReceived: function(noti, payload) {
-    if (this.config.debug == true) console.log("[AVSTOCK] Notification Received: ", noti);
-    if (noti == "UPDATE") {
-      if (payload.hasOwnProperty('symbol')) {
-        this.stocks[payload.symbol] = payload
-        this.update(payload)
+    if (payload.hasOwnProperty('instanceId') && (payload.instanceId == this.identifier)) {
+      if (this.config.debug == true) console.log("[AVSTOCK] Notification Received: ", noti);
+      if (noti == "UPDATE") {
+        if (payload.hasOwnProperty('symbol')) {
+          this.stocks[payload.result.symbol] = payload.result
+          this.update(payload.result)
+        }
       }
-    }
-    if (noti == "UPDATE_SERIES") {
-      this.updateSeries(payload)
+      if (noti == "UPDATE_SERIES") {
+        this.updateSeries(payload.ts)
+      }
     }
   },
 
@@ -250,6 +302,8 @@ Module.register("MMM-AVStock", {
     var changeV = 0
     var lastPrice = 0
     var requestTime = ""
+
+    var moduleDom = document.getElementById(this.identifier);
 
     //determine max, min etc. for graph size
     for(i in series) {
@@ -282,7 +336,7 @@ Module.register("MMM-AVStock", {
       }
     }
 
-    var cvs = document.getElementById("AVSTOCK_CANVAS")
+    var cvs = document.querySelector('#' + this.identifier + ' #AVSTOCK_CANVAS');
     var ctx = cvs.getContext("2d")
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
 
@@ -328,25 +382,25 @@ Module.register("MMM-AVStock", {
     }
 
 
-    var stock = document.getElementById("symbol_series")
+    var stock = document.querySelector('#' + this.identifier + ' #symbol_series');
     stock.innerHTML = this.getStockName(symbol)
-    var price = document.getElementById("price_series")
+    var price = document.querySelector('#' + this.identifier + ' #price_series');
     price.innerHTML = lastPrice
-    var change = document.getElementById("change_series")
+    var change = document.querySelector('#' + this.identifier + ' #change_series');
     change.innerHTML = changeV
 
-    var tr = document.getElementById("AVSTOCK_SERIES")
-    tr.className = "animated stock " + ud
-    var tl = document.getElementById("AVSTOCK_TAGLINE")
+    var tr = document.querySelector('#' + this.identifier + ' #AVSTOCK_SERIES');
+    tr.className = "avstock_series animated stock " + ud
+    var tl = document.querySelector('#' + this.identifier + ' #AVSTOCK_TAGLINE');
     tl.innerHTML = "Last updated: " + requestTime
     setTimeout(()=>{
-      tr.className = "stock " + ud
+      tr.className = "avstock_series stock " + ud
     }, 1500);
   },
 
   drawTable: function(stock) {
     var hash = stock.hash
-    var tr = document.getElementById("STOCK_" + hash)
+    var tr = document.querySelector('#' + this.identifier + ' #STOCK_' + hash)
     var ud = ""
     for (j = 1 ; j <= 5 ; j++) {
       var tdId = header[j] + "_" + hash
@@ -362,7 +416,7 @@ Module.register("MMM-AVStock", {
       }
     }
     tr.className = "animated stock " + ud
-    var tl = document.getElementById("AVSTOCK_TAGLINE")
+    var tl = document.querySelector('#' + this.identifier + ' #AVSTOCK_TAGLINE');
     tl.innerHTML = "Last updated: " + stock.requestTime
     setTimeout(()=>{
       tr.className = "stock " + ud
@@ -371,11 +425,11 @@ Module.register("MMM-AVStock", {
 
   drawTicker: function(stock) {
     var hash = stock.hash
-    var tr = document.getElementById("STOCK_" + hash)
+    var tr = document.querySelector('#' + this.identifier + ' #STOCK_' + hash)
     var ud = ""
-    var price = document.getElementById("price_" + hash)
+    var price = document.querySelector('#' + this.identifier + ' #price_' + hash)
     price.innerHTML = stock.price
-    var change = document.getElementById("change_" + hash)
+    var change = document.querySelector('#' + this.identifier + ' #change_' + hash)
     change.innerHTML = stock.change
     if (stock.change > 0) {
       ud = "up"
